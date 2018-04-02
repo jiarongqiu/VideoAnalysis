@@ -14,9 +14,14 @@ from PIL import Image
 
 from video.inception_resnet_v2 import inception_resnet_v2_arg_scope, inception_resnet_v2
 from video.utils import show_tensor
-DIR_NAME = "../data/"
-MODEL_DIR = os.path.join(DIR_NAME, "checkpoints")
-DEMO_DIR = os.path.join(DIR_NAME, "demo")
+from data_provider.example import Example
+
+
+
+MODEL_DIR = Example.MODEL_DIR
+EXAMPLE_DIR = Example.EXAMPLE_DIR
+example=Example()
+sample_images=[example.get_image()]
 
 slim = tf.contrib.slim
 
@@ -58,7 +63,6 @@ class InceptionResNetV2(object):
         return np.array(ret)
 
     def test(self):
-        sample_images = [os.path.join(DEMO_DIR, 'dog.jpg')]
         print(self.images2feature(sample_images).shape)
         print("Inception Test Finished")
 

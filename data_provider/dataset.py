@@ -16,7 +16,8 @@ class Dataset:
     start_pos = 0
     batch_size = 0
     finished = False
-
+    MODEL_DIR = "../models/"
+    EXAMPLE_DIR = "../examples/"
     def __init__(self):
 
         pass

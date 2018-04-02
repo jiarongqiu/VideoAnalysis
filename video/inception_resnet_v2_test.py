@@ -9,7 +9,7 @@ from PIL import Image
 from video.inception_resnet_v2 import *
 import numpy as np
 from tensorflow.python import pywrap_tensorflow
-
+from data_provider.example import Example
 dir_name='../data/'
 checkpoint_file = dir_name+'checkpoints/inception_resnet_v2_2016_08_30.ckpt'
 sample_images = ['dog.jpg', 'panda.jpg']

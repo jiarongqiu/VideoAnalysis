@@ -18,12 +18,15 @@ def get_file_list(path, _except=None, sort=True):
         return [os.path.join(path, x) for x in os.listdir(path) if
                 os.path.isfile(os.path.join(path, x)) and x != _except]
 
-def single_video_to_image(infile, frame=5, crop_size=299):
-    folder = os.path.splitext(infile)[0]
+def get_parent_folder(path):
+    return os.path.splitext(path)[0]
+
+def single_video_to_image(infile,folder, frame=5, crop_size=299):
     os.system("rm -rf %s" % folder)
     os.system("mkdir %s" % folder)
     str = "ffmpeg -i %s -s %d*%d -vf fps=%d %s" % (infile, crop_size, crop_size, frame, folder) + "/%05d.jpg"
     os.system(str)
+
 
 def single_video_to_wav(infile):
     outfile=os.path.splitext(infile)[0]+".wav"
