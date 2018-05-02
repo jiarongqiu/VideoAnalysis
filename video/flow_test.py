@@ -5,25 +5,28 @@
 
 import cv2
 import numpy as np
+import os
 
 
-def dense_optical_flow_test(images):
-    assert len(images) > 1
+def dense_optical_flow_test(frames,folder):
+    os.system("rm -rf %s" % folder)
+    os.system("mkdir %s" % folder)
+    # print(frames,folder)
+    assert len(frames) > 1
     pt = 0
-    frame1 = cv2.imread(images[pt])
+    frame1 = cv2.imread(frames[pt])
     prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
     hsv = np.zeros_like(frame1)
     pt += 1
-    while (pt != len(images)):
-        frame2 = cv2.imread(images[pt])
+    while (pt != len(frames)):
+        frame2 = cv2.imread(frames[pt])
         next = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-        flow = cv2.calcOpticalFlowFarneback(prvs, next, 0.5, 3, 15, 3, 5, 1.2, 0)
+        flow = cv2.calcOpticalFlowFarneback(prvs, next,None, 0.5, 3, 15, 3, 5, 1.2, 0)
         mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
         hsv[..., 0] = ang * 180 / np.pi / 2
         hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
         rgb = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
-        print(rgb.shape)
-        cv2.imwrite("../data/flow_test/dense_flow_" + str(pt) + ".png", rgb)
+        cv2.imwrite(os.path.join(folder,"dense_flow_" + str(pt) + ".png"),rgb)
         prvs = next
         pt += 1
 
@@ -40,7 +43,7 @@ def dense_optical_flow(images):
     while (pt != len(images)):
         frame2 = cv2.imread(images[pt])
         next = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
-        flow = cv2.calcOpticalFlowFarneback(prvs, next, 0.5, 3, 15, 3, 5, 1.2, 0)
+        flow = cv2.calcOpticalFlowFarneback(prvs, next,None, 0.5, 3, 15, 3, 5, 1.2, 0)
         mag, ang = cv2.cartToPolar(flow[..., 0], flow[..., 1])
         hsv[..., 0] = ang * 180 / np.pi / 2
         hsv[..., 2] = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX)
@@ -51,7 +54,7 @@ def dense_optical_flow(images):
     return np.array(ret)
 
 
-def LK_optical_flow(images):
+def LK_optical_flow(frames, folder):
     # params for ShiTomasi corner detection
     feature_params = dict(maxCorners=100,
                           qualityLevel=0.3,
@@ -68,7 +71,7 @@ def LK_optical_flow(images):
 
     # Take first frame and find corners in it
     pt = 0
-    frame1 = cv2.imread(images[pt])
+    frame1 = cv2.imread(frames[pt])
     prvs = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
     p0 = cv2.goodFeaturesToTrack(prvs, mask=None, **feature_params)
     pt += 1
@@ -76,8 +79,8 @@ def LK_optical_flow(images):
     # Create a mask image for drawing purposes
     mask = np.zeros_like(frame1)
 
-    while (pt != len(images)):
-        frame2 = cv2.imread(images[pt])
+    while (pt != len(frames)):
+        frame2 = cv2.imread(frames[pt])
         print(frame2.shape)
         next = cv2.cvtColor(frame2, cv2.COLOR_BGR2GRAY)
 
@@ -96,7 +99,7 @@ def LK_optical_flow(images):
             cv2.line(mask, (a, b), (c, d), color[i].tolist(), 2)
             cv2.circle(frame2, (a, b), 5, color[i].tolist(), -1)
         img = cv2.add(frame2, mask)
-        cv2.imwrite("../data/flow_test/LK_flow" + str(pt) + ".png", mask)
+        cv2.imwrite(os.path.join(folder,"LK_flow" + str(pt) + ".png"), mask)
         prvs = next
         pt += 1
 

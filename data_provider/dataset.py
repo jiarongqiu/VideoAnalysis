@@ -16,8 +16,8 @@ class Dataset:
     start_pos = 0
     batch_size = 0
     finished = False
-    MODEL_DIR = "../models/"
-    EXAMPLE_DIR = "../examples/"
+    MODEL_DIR = "/home/charlie/Desktop/VideoAnalysis/models"
+    EXAMPLE_DIR = "/home/charlie/Desktop/VideoAnalysis/examples"
     def __init__(self):
 
         pass

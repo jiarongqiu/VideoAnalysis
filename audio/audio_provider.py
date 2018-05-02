@@ -10,14 +10,14 @@ from __future__ import division
 import tensorflow as tf
 import os
 
+from data_provider.example import Example
 from audio import vggish_postprocess, vggish_slim, vggish_params, vggish_input
-
+import numpy as np
 slim = tf.contrib.slim
 
-DIR_NAME = "../data/"
-MODEL_DIR = os.path.join(DIR_NAME, "checkpoints")
-DEMO_DIR = os.path.join(DIR_NAME, "demo")
-
+MODEL_DIR = Example.MODEL_DIR
+DEMO_DIR = Example.EXAMPLE_DIR
+example=Example()
 
 class VGG(object):
     """
@@ -41,13 +41,17 @@ class VGG(object):
         print("VGG Model Load In Finished")
 
     def wav2feature(self, wav_file):
-        examples_batch = vggish_input.wavfile_to_examples(wav_file)
-        [embedding_batch] = self.sess.run([self.embedding_tensor], feed_dict={self.features_tensor: examples_batch})
-        postprocessed_batch = self.pproc.postprocess(embedding_batch)
-        return postprocessed_batch
+        if not os.path.exists(wav_file):
+            feat = np.zeros(128)
+        else:
+            examples_batch = vggish_input.wavfile_to_examples(wav_file)
+            [embedding_batch] = self.sess.run([self.embedding_tensor], feed_dict={self.features_tensor: examples_batch})
+            postprocessed_batch = self.pproc.postprocess(embedding_batch)
+            feat = np.mean(postprocessed_batch, axis=0)
+        return feat
 
     def test(self):
-        wav_file = os.path.join(DEMO_DIR, "audio_test.wav")
+        wav_file = example.get_audio()
         print (self.wav2feature(wav_file).shape)
         print("VGG Test Finished")
 

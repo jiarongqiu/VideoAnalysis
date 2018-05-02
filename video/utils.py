@@ -36,8 +36,11 @@ def show_tensor(checkpoint_file):
     for key in sorted(var_to_shape_map):
         print("shape: "+str(reader.get_tensor(key).shape)+" tensor_name: "+key)
 
-def main():
-    show_tensor()
 
+
+
+def main():
+    # show_tensor()
+    pass
 if __name__ == '__main__':
     main()

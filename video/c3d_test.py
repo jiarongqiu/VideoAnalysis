@@ -30,140 +30,547 @@ from __future__ import print_function
 
 import os.path
 import time
-from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 import video.input_data
-import video.c3d_model as model
+from video.c3d_model import C3DModel
 import numpy as np
+import json
+from data_provider.UCF101 import UCF101
+from video.video_provider import C3D
+from sklearn import svm
+import pickle
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+from sklearn.linear_model import SGDClassifier
 # Basic model parameters as external flags.
 flags = tf.app.flags
-gpu_num = 2
-flags.DEFINE_integer('batch_size', 10, 'Batch size.')
+gpu_num = 1
+flags.DEFINE_integer('batch_size', 16, 'Batch size.')
 FLAGS = flags.FLAGS
 
 
-def placeholder_inputs(batch_size):
-    """Generate placeholder variables to represent the input tensors.
-    These placeholders are used as inputs by the rest of the model building
-    code and will be fed from the downloaded data in the .run() loop, below.
-    Args:
-      batch_size: The batch size will be baked into both placeholders.
-    Returns:
-      images_placeholder: Images placeholder.
-      labels_placeholder: Labels placeholder.
-    """
-    # Note that the shapes of the placeholders match the shapes of the full
-    # image and label tensors, except the first dimension is now batch_size
-    # rather than the full size of the train or test data sets.
-    images_placeholder = tf.placeholder(tf.float32, shape=(batch_size,
-                                                           model.NUM_FRAMES_PER_CLIP,
-                                                           model.CROP_SIZE,
-                                                           model.CROP_SIZE,
-                                                           model.CHANNELS))
-    labels_placeholder = tf.placeholder(tf.int64, shape=(batch_size))
-    return images_placeholder, labels_placeholder
+def end2end():
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    model = C3D()
 
+    pred = []
+    y = []
+    cnt=0
+    for video, label in test_list:
+        pred.append(model.predict(dataset.get_random_clip(video)))
+        y.append(label)
 
-def _variable_on_cpu(name, shape, initializer):
-    # with tf.device('/cpu:%d' % cpu_id):
-    with tf.device('/cpu:0'):
-        var = tf.get_variable(name, shape, initializer=initializer)
-    return var
-
-
-def _variable_with_weight_decay(name, shape, stddev, wd):
-    var = _variable_on_cpu(name, shape, tf.truncated_normal_initializer(stddev=stddev))
-    if wd is not None:
-        weight_decay = tf.nn.l2_loss(var) * wd
-        tf.add_to_collection('losses', weight_decay)
-    return var
-
-
-def run_test():
-    model_name = "./sports1m_finetuning_ucf101.model"
-    test_list_file = 'list/test.list'
-    num_test_videos = len(list(open(test_list_file, 'r')))
-    print("Number of test videos={}".format(num_test_videos))
-
-    # Get the sets of images and labels for training, validation, and
-    images_placeholder, labels_placeholder = placeholder_inputs(FLAGS.batch_size * gpu_num)
-    with tf.variable_scope('var_name') as var_scope:
-        weights = {
-            'wc1': _variable_with_weight_decay('wc1', [3, 3, 3, 3, 64], 0.04, 0.00),
-            'wc2': _variable_with_weight_decay('wc2', [3, 3, 3, 64, 128], 0.04, 0.00),
-            'wc3a': _variable_with_weight_decay('wc3a', [3, 3, 3, 128, 256], 0.04, 0.00),
-            'wc3b': _variable_with_weight_decay('wc3b', [3, 3, 3, 256, 256], 0.04, 0.00),
-            'wc4a': _variable_with_weight_decay('wc4a', [3, 3, 3, 256, 512], 0.04, 0.00),
-            'wc4b': _variable_with_weight_decay('wc4b', [3, 3, 3, 512, 512], 0.04, 0.00),
-            'wc5a': _variable_with_weight_decay('wc5a', [3, 3, 3, 512, 512], 0.04, 0.00),
-            'wc5b': _variable_with_weight_decay('wc5b', [3, 3, 3, 512, 512], 0.04, 0.00),
-            'wd1': _variable_with_weight_decay('wd1', [8192, 4096], 0.04, 0.001),
-            'wd2': _variable_with_weight_decay('wd2', [4096, 4096], 0.04, 0.002),
-            'out': _variable_with_weight_decay('wout', [4096, model.NUM_CLASSES], 0.04, 0.005)
-        }
-        biases = {
-            'bc1': _variable_with_weight_decay('bc1', [64], 0.04, 0.0),
-            'bc2': _variable_with_weight_decay('bc2', [128], 0.04, 0.0),
-            'bc3a': _variable_with_weight_decay('bc3a', [256], 0.04, 0.0),
-            'bc3b': _variable_with_weight_decay('bc3b', [256], 0.04, 0.0),
-            'bc4a': _variable_with_weight_decay('bc4a', [512], 0.04, 0.0),
-            'bc4b': _variable_with_weight_decay('bc4b', [512], 0.04, 0.0),
-            'bc5a': _variable_with_weight_decay('bc5a', [512], 0.04, 0.0),
-            'bc5b': _variable_with_weight_decay('bc5b', [512], 0.04, 0.0),
-            'bd1': _variable_with_weight_decay('bd1', [4096], 0.04, 0.0),
-            'bd2': _variable_with_weight_decay('bd2', [4096], 0.04, 0.0),
-            'out': _variable_with_weight_decay('bout', [model.NUM_CLASSES], 0.04, 0.0),
-        }
-    logits = []
-    for gpu_index in range(0, gpu_num):
-        with tf.device('/gpu:%d' % gpu_index):
-            logit = model.inference_c3d(
-                images_placeholder[gpu_index * FLAGS.batch_size:(gpu_index + 1) * FLAGS.batch_size, :, :, :, :], 0.6,
-                FLAGS.batch_size, weights, biases)
-            logits.append(logit)
-    logits = tf.concat(logits, 0)
-    norm_score = tf.nn.softmax(logits)
-    saver = tf.train.Saver()
-    sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
-    init = tf.global_variables_initializer()
-    sess.run(init)
-    # Create a saver for writing training checkpoints.
-    saver.restore(sess, model_name)
-    # And then after everything is built, start the training loop.
-    bufsize = 0
-    write_file = open("predict_ret.txt", "w+", bufsize)
-    next_start_pos = 0
-    all_steps = int((num_test_videos - 1) / (FLAGS.batch_size * gpu_num) + 1)
-    for step in xrange(all_steps):
-        # Fill a feed dictionary with the actual set of images and labels
-        # for this particular training step.
-        start_time = time.time()
-        test_images, test_labels, next_start_pos, _, valid_len = \
-            video.input_data.read_clip_and_label(
-                test_list_file,
-                FLAGS.batch_size * gpu_num,
-                start_pos=next_start_pos
-            )
-        predict_score = norm_score.eval(
-            session=sess,
-            feed_dict={images_placeholder: test_images}
-        )
-        for i in range(0, valid_len):
-            true_label = test_labels[i],
-            top1_predicted_label = np.argmax(predict_score[i])
-            # Write results: true label, class prob for true label, predicted label, class prob for predicted label
-            write_file.write('{}, {}, {}, {}\n'.format(
-                true_label[0],
-                predict_score[i][true_label],
-                top1_predicted_label,
-                predict_score[i][top1_predicted_label]))
+    write_file = open(os.path.join(dataset.RES_DIR, "c3d_end.txt"), "w")
+    for i in range(len(pred)):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, pred[i], 0))
     write_file.close()
-    print("done")
+def fc7_sgd(l2=False):
+    method='c3d_fc7'
+    if l2:
+        name='c3d_fc7_l2_sgd'
+    else:
+        name='c3d_fc7_sgd'
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt=0
+    for video, label in train_list:
+        video=video.split('/')[-1]
+        feature=dataset.load_feature(video,method=method,l2=l2)
+        X.append(feature)
+        y.append(label)
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    clf = SGDClassifier()
+    clf.fit(X, y)
+    pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, name), 'w'))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        X.append(dataset.load_feature(video,method=method,l2=l2))
+        y.append(label)
+    X = np.array(X)
+    y = np.array(y)
+
+    print(X.shape, y.shape)
+    # print(clf.predict(X))
+    write_file = open(os.path.join(dataset.RES_DIR, name+".txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+
+def fc7_svm(l2=False):
+    method='c3d_fc7'
+    if l2:
+        name='c3d_fc7_l2_svm'
+    else:
+        name='c3d_fc7_svm'
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt=0
+    for video, label in train_list:
+        video=video.split('/')[-1]
+        feature=dataset.load_feature(video,method=method,l2=l2)
+        X.append(feature)
+        y.append(label)
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, name), 'w'))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        X.append(dataset.load_feature(video,method=method,l2=l2))
+        y.append(label)
+    X = np.array(X)
+    y = np.array(y)
+
+    print(X.shape, y.shape)
+    # print(clf.predict(X))
+    write_file = open(os.path.join(dataset.RES_DIR, name+".txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+def rgb_logit(l2=False):
+    method='rgb_logit'
+    if l2:
+        name='rgb_logit_l2_svm'
+    else:
+        name='rgb_logit_svm'
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>500:break
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    # print(y)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, name), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    write_file = open(os.path.join(dataset.RES_DIR, name+".txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+def flow_logit(l2=False):
+    method='flow_logit'
+    if l2:
+        name='flow_logit_l2_svm'
+    else:
+        name='flow_logit_svm'
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>500:break
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    # print(y)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, name), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        # print(video,feature)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    # print(clf.predict(X),y)
+    print(X.shape, y.shape)
+    write_file = open(os.path.join(dataset.RES_DIR, name+".txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+def audio(l2=False):
+    method='vgg'
+    if l2:
+        name='audio_l2_svm'
+    else:
+        name='audio_svm'
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>500:break
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    # print(y)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, name), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        feature = dataset.load_feature(video, method=method, l2=l2)
+        # print(video,feature)
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    # print(clf.predict(X),y)
+    print(X.shape, y.shape)
+    write_file = open(os.path.join(dataset.RES_DIR, name+".txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+#2002 dims
+def two_stream(l2=True):
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        feature=np.hstack((rgb_feature,flow_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>500:break
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    # print(y)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    if l2:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'two_stream_l2_svm'), 'w'))
+    else:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'two_stream_svm'), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        feature = np.hstack((rgb_feature, flow_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    # print(clf.predict(X),y)
+    print(X.shape, y.shape)
+    if l2:
+        write_file = open(os.path.join(dataset.RES_DIR, "two_stream_l2_svm.txt"), "w")
+    else:
+        write_file = open(os.path.join(dataset.RES_DIR, "two_stream_svm.txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+
+#6098 dims
+def visual(l2=True):
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        video_feature =dataset.load_feature(video, method='c3d_fc7', l2=l2)
+        feature=np.hstack((rgb_feature,flow_feature,video_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    # print(y)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    if l2:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'visual_l2_svm'), 'w'))
+    else:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'visual_svm'), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        video_feature = dataset.load_feature(video, method='c3d_fc7', l2=l2)
+        feature = np.hstack((rgb_feature, flow_feature, video_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    # print(clf.predict(X),y)
+    print(X.shape, y.shape)
+    if l2:
+        write_file = open(os.path.join(dataset.RES_DIR, "visual_l2_svm.txt"), "w")
+    else:
+        write_file = open(os.path.join(dataset.RES_DIR, "visual_svm.txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+#6098 dims
+def visual_audio(l2=True):
+    dataset = UCF101()
+    dataset.load_in()
+    test_list = dataset.test_list
+    train_list = dataset.train_list
+    X = []
+    y = []
+    cnt = 0
+    for video, label in train_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        video_feature =dataset.load_feature(video, method='c3d_fc7', l2=l2)
+        audio_feature = dataset.load_feature(video, method='vgg', l2=l2)
+        feature=np.hstack((rgb_feature,flow_feature,video_feature,audio_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+    X = np.array(X)
+    y = np.array(y)
+    print(X.shape, y.shape)
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X, y)
+    if l2:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'visual_audio_l2_svm'), 'w'))
+    else:
+        pickle.dump(clf, open(os.path.join(UCF101.MODEL_DIR, 'visual_audio_svm'), 'w'))
+    # print(clf.predict(X))
+    X = []
+    y = []
+    cnt = 0
+    for video, label in test_list:
+        video = video.split('/')[-1]
+        rgb_feature = dataset.load_feature(video, method='rgb_logit', l2=l2)
+        flow_feature = dataset.load_feature(video, method='flow_logit', l2=l2)
+        video_feature = dataset.load_feature(video, method='c3d_fc7', l2=l2)
+        audio_feature = dataset.load_feature(video, method='vgg', l2=l2)
+        feature = np.hstack((rgb_feature, flow_feature, video_feature,audio_feature))
+        X.append(feature)
+        y.append(label)
+        cnt+=1
+        # if cnt>100:break
+    X = np.array(X)
+    y = np.array(y)
+    # print(clf.predict(X),y)
+    print(X.shape, y.shape)
+    if l2:
+        write_file = open(os.path.join(dataset.RES_DIR, "visual_audio_l2_svm.txt"), "w")
+    else:
+        write_file = open(os.path.join(dataset.RES_DIR, "visual_audio_svm.txt"), "w")
+    for i in range(X.shape[0]):
+        write_file.write('{}, {}, {}, {}\n'.format(y[i], 0, clf.predict(X[i].reshape(1, -1))[0], 0))
+    write_file.close()
+
+def evaluate():
+    dataset = UCF101()
+    #name+annotaion
+    methods=[
+        ("c3d_end","C3D End to END"),
+        ("c3d_fc7_sgd", "C3D FC7 + SGD"),
+        ("c3d_fc7_l2_sgd", "C3D FC7 + L2 + SGD"),
+        ("c3d_fc7_svm","C3D FC7 + SVM"),
+        ("c3d_fc7_l2_svm","C3D FC7 + L2 "),
+        ("rgb_logit_svm","Inception "),
+        ("rgb_logit_l2_svm","Inception + L2 "),
+        ("flow_logit_svm","Flow "),
+        ("flow_logit_l2_svm","Flow + L2 "),
+        ("audio_svm","Audio"),
+        ("audio_l2_svm", "Audio + L2 "),
+        ("two_stream_svm","Two Stream "),
+        ("two_stream_l2_svm","Two Stream + L2 "),
+        ("visual_svm","Visual"),
+        ("visual_l2_svm","Visual + L2 "),
+        ("visual_audio_svm", "Visual + Audio"),
+        ("visual_audio_l2_svm", "Visual + Audio + L2 ")
+    ]
+    result=[]
+    for method,annotation in methods:
+        with open(os.path.join(dataset.RES_DIR, method+'.txt'), 'r') as fr:
+            total = 0
+            cnt = 0
+            for line in fr:
+                label, _, pred, _ = line.strip().split()
+                if label == pred:
+                    cnt += 1
+                total += 1
+        result.append((annotation,cnt/total))
+        print(annotation, "accuracy", cnt / total, "correct", cnt, "total", total)
+    plot(result)
+
+def plot(result,bar_width=0.5):
+    feature_result = [
+        ("C3D", 0.736),
+        ("Inception ResNet", 0.758),
+        ("Optical-Flow", 0.435),
+        ("Audio", 0.234),
+        ("Two-Stream", 0.777),
+        ("Visual", 0.828),
+        ("Multi-Modality", 0.872)
+    ]
+    classifier_result = [
+        ("C3D End to End", 0.566),
+        ("C3D FC7 + SGD", 0.716),
+        ("C3D FC7 + SVM", 0.736)
+    ]
+    l2_result = [
+        ("C3D", -0.009),
+        ("Inception ResNet", -0.01),
+        ("Optical-Flow", -0.104),
+        ("Audio", -0.004),
+        ("Two-Stream", 0.007),
+        ("Visual", 0.028),
+        ("Multi-Modality", 0.163)
+    ]
+    # plt.ylabel('Recall@AN=200', fontsize=fn_size)
+
+    sns.set(font_scale=1.5,rc={'figure.figsize':(15,10)})
+    sns.set_style('whitegrid')
+    X=[x[1]*100 for x in feature_result ]
+    y=[x[0] for x in feature_result]
+    ax=sns.barplot(x=X,y=y,palette='PuBuGn_d')
+    plt.xlim(0,100)
+    for p in ax.patches:
+        p.set_height(.5)
+        ax.annotate("%.2lf " % p.get_width()+"%",xy=(p.get_x()+p.get_width()+1.2,p.get_y()+0.27))
+    plt.xlabel("Accuracy")
+    plt.savefig(os.path.join(UCF101.RES_DIR,'fig1'))
+    plt.close()
+
+    sns.set(font_scale=1.5,rc={'figure.figsize':(15,10)})
+    sns.set_style('whitegrid')
+    X=[x[1]*100 for x in l2_result ]
+    y=[x[0] for x in l2_result]
+    ax=sns.barplot(x=X,y=y,palette='PuBuGn_d')
+    plt.xlim(-15,20)
+    for p in ax.patches[:4]:
+        p.set_height(.5)
+        ax.annotate("%.2lf" % p.get_width()+"%", xy=(p.get_x() + p.get_width()-3.5, p.get_y() + 0.25))
+    for p in ax.patches[4:]:
+        p.set_height(.5)
+        ax.annotate("%.2lf" % p.get_width()+"%", xy=(p.get_x() + p.get_width()+0.5, p.get_y() + 0.25))
+    plt.xlabel("Accuracy")
+    plt.savefig(os.path.join(UCF101.RES_DIR,'fig2'))
+    plt.close()
+
+    sns.set(font_scale=1.25,rc={'figure.figsize':(15,10)})
+    sns.set_style('whitegrid')
+    X=[x[1]*100 for x in classifier_result ]
+    y=[x[0] for x in classifier_result]
+    ax=sns.barplot(x=X,y=y,palette='PuBuGn_d')
+    plt.xlim(0,100)
+    for p in ax.patches:
+        p.set_height(.5)
+        ax.annotate("%.2lf" % p.get_width(), xy=(p.get_x() + p.get_width() + 1.2, p.get_y() + 0.25))
+    plt.savefig(os.path.join(UCF101.RES_DIR,'fig3'))
 
 
 def main(_):
-    run_test()
+    # fc7_sgd(l2=True)
+    # fc7_svm()
+    # end2end()
+    # rgb_logit()
+    # flow_logit(l2=False)
+    # audio(l2=True)
+    # two_stream(l2=True)
+    # visual(l2=False)
+    # visual_audio(l2=True)
+    evaluate()
 
 
 if __name__ == '__main__':
