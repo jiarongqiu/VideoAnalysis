@@ -2,25 +2,39 @@
 
 This repo aims to prepare for the ActivityNet Challenge
 
+Relevant Tasks: Temporal Action Proposal, Temporal Action Recogniton,
+Temporal Action Detection(Localization)
 
-## Step 1
+## Feature Extraction
+Multi-modality Features:
 
-* audio feature check
-    CNN
-* Two-Stream
-    RGB and Flow + Inception
-* C3D
+* Video Feature: Temporal and Spatial
+    * C3D
+* RGB Feature: Spatial
+    * Inception-ResNet-v2
+* Optical-Flow Feature: Temporal
 
-## Step 2
+* Audio Feature
 
-finetune on UCF101
 
-## Step 3
+## Model
 
-* sliding windows
-* watershed
+* Temporal Action Proposal
+    * Sliding Window
+    * TURN
+    * SST
+    * TAG
 
-## Step 4
+* Temporal Action Recognition
 
-* evaluate
+*  Detection
+
+
+## Improvement Technique
+
+
+## Evaluation
+
+
+## Coding Architecture
 

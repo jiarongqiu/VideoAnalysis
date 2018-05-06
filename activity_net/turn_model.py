@@ -5,12 +5,12 @@ from tensorflow.python.framework import dtypes
 
 import vs_multilayer
 from cnn import fc_layer as fc
-from dataset import TestingDataSet
+from dataset import ValidationDataSet
 from dataset import TrainingDataSet
 
 class TURN_Model(object):
     ctx_num = 4
-    unit_size = 16.0
+    unit_size = 1
     unit_feature_size = 2048
     lr = 0.005
     lambda_reg = 2.0
@@ -19,11 +19,14 @@ class TURN_Model(object):
     visual_feature_dim=unit_feature_size*3
     def __init__(self,):
         self.train_set = TrainingDataSet(self.batch_size)
-        self.test_set = TestingDataSet()
+        self.val_set = ValidationDataSet()
 
     def fill_feed_dict_train_reg(self):
         image_batch, label_batch, offset_batch = self.train_set.next_batch()
-        image_batch=np.nan_to_num(image_batch)
+        _,epoch,_=self.train_set.get_training_info()
+        if (epoch+1)%5==0:
+            self.lr/=10
+            print("Learning Rate",self.lr)
         input_feed = {
             self.visual_featmap_ph_train: image_batch,
             self.label_ph: label_batch,

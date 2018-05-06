@@ -105,10 +105,9 @@ class ActivityNet(object):
             info={}
         return info
 
-    def get_train_test(self):
-        return self.train_info,self.test_info
-
     def stat(self):
+        # for video,meta in self.train_info:
+        #
         ANNOTATION_DIR = "/data1/densevid/captions"
         train_info, test_info = {}, {}
         total_duration=cnt=0
@@ -139,4 +138,4 @@ if __name__ == '__main__':
     info=dataset.get_info(video,subset)
     print(info)
     feature=dataset.load_feature(video,0,1,subset)
-    print(feature[0,:])
+    print(feature[0,:50])

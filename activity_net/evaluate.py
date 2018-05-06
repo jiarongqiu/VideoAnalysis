@@ -9,10 +9,11 @@ import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
-import seaborn as sns
 import os
 import pickle
+import pandas as pd
 from ActivityNet import ActivityNet
+import time
 
 def cal_iou(period1,period2):
     if period1[1] < period2[0] or period2[1] < period1[0]:
@@ -37,34 +38,54 @@ def cal_recall(predicts,groundtruth,tiou=0.5,num_proposals=100):
         }
         }
     """
-    assert len(predicts)==len(groundtruth)
+    # assert len(predicts)==len(groundtruth)
     total_videos=len(predicts)
-    total_submission_num_proposals=sum([len(predicts[video]['proposals'])for video in predicts])
-    avg_submission_num_proposals=total_submission_num_proposals/total_videos
-    ratio=num_proposals/avg_submission_num_proposals
-    total_proposals=sum([len(groundtruth[video]['proposals'])for video in groundtruth])
-    count_all=0
-    count=0
-    for vid,info in predicts.iteritems():
-        end_idx=int(min(len(info['proposals'])*ratio,len(info['proposals'])))
-        predict_proposals=[[proposal['start'],proposal['end']] for proposal in info['proposals'][:end_idx]]
-        groundtruth_proposals = [[proposal['start'], proposal['end']] for proposal in groundtruth[vid]['proposals']]
 
+    predict_proposals=[]
+    # groundtruth_proposals=[]
+    for vid, info in predicts.iteritems():
+        predict_proposals.extend([vid,proposal['start'],proposal['end'],proposal['score']] for proposal in info['proposals'])
+    predict_proposals=pd.DataFrame(predict_proposals)
+    predict_proposals=predict_proposals.sort_values(by=[3],ascending=False)
+    require_proposal_num=num_proposals*total_videos
+    predict_proposals_num=len(predict_proposals)
+    # print(total_videos,num_proposals,require_proposal_num,len(predict_proposals))
+    # if require_proposal_num>predict_proposals_num:
+    #     replicate_num=require_proposal_num-predict_proposals_num
+    #     df=predict_proposals.iloc[-replicate_num:,:]
+    #     predict_proposals=predict_proposals.append(df)
+    if require_proposal_num<predict_proposals_num:
+        predict_proposals=predict_proposals.iloc[:require_proposal_num,:]
+    # print(predict_proposals_num,len(predict_proposals),require_proposal_num)
+    # assert len(predict_proposals)==require_proposal_num
+    predict_proposals = {key: zip(group[1].tolist(), group[2].tolist()) for key, group in
+                         predict_proposals.groupby(by=[0])}
+    count=0
+    count_all=0
+    duration1=0
+    duration2=0
+
+    for vid,info in groundtruth.iteritems():
+        start1 = time.time()
+        pred=predict_proposals.get(vid,[])
+        groundtruth_proposals = [[proposal['start'], proposal['end']] for proposal in info['proposals']]
+        duration1 += time.time() - start1
+        start2 = time.time()
         for gt in groundtruth_proposals:
             count_all+=1
-            for pred in predict_proposals:
-                if cal_iou(gt,pred)>tiou:
+            for p in pred:
+                if cal_iou(gt,p)>tiou:
                     count+=1
                     break
-    # print(count,total_proposals,count_all)
-    return count/total_proposals
+        duration2 += time.time() - start2
+    return count/count_all
 
 def cal_average_recall(predicts,groundtruth,num_proposals=100):
     print("Total predict proposals",sum([len(predicts[vid]['proposals']) for vid in predicts]))
     print("Total groundtruth proposals", sum([len(groundtruth[vid]['proposals']) for vid in groundtruth]))
     tious=np.arange(0.5,1,0.05)
     ret=[cal_recall(predicts,groundtruth,tiou=t,num_proposals=num_proposals)for t in tious ]
-    # print([(t,ret[idx]) for idx,t in enumerate(np.arange(0.5,1,0.05))])
+    print([(t,ret[idx]) for idx,t in enumerate(np.arange(0.5,1,0.05))])
     return sum(ret)/len(ret)
 
 def cal_total_average_recall(predicts,groundtruth,num_proposals=10000):

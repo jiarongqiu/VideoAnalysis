@@ -19,6 +19,7 @@ import numpy as np
 import cv2
 import time
 from video.utils import show_tensor
+
 num_frames_per_clip=16
 crop_size=112
 np_mean = np.load(os.path.join("../models/", 'crop_mean.npy')).reshape(
